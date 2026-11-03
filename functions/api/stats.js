@@ -13,9 +13,7 @@
 //   -> increments totalViews once. The frontend calls this once per page load,
 //      never per list poll (heartbeat removed).
 //
-// New D1 tables are created automatically here (CREATE TABLE IF NOT EXISTS),
-// so no manual D1 Studio step is needed when this version is deployed:
-//   stats    (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)
+// Tables already exist from v2 (stats table); no CREATE is run per request.
 
 const PINNED = ["NG-L4OsDf55", "NG-A5xqvFoY"];
 
@@ -24,12 +22,6 @@ function json(data, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
-}
-
-async function ensureTables(env) {
-  await env.DB.prepare(
-    "CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)"
-  ).run();
 }
 
 // Midnight (start of day) in Africa/Cairo for the given instant, as epoch ms.
@@ -101,7 +93,6 @@ export async function onRequestGet(context) {
   const { env } = context;
   if (!env.DB) return json({ ok: false, error: "D1 database is not bound (DB)" }, 500);
   try {
-    await ensureTables(env);
     const counts = await readCountsLight(env, Date.now());
     return json({ ok: true, ...counts });
   } catch (e) {
@@ -120,7 +111,6 @@ export async function onRequestPost(context) {
   }
   const action = body.action || body.type || "";
   try {
-    await ensureTables(env);
     const now = Date.now();
     if (action === "view") {
       await env.DB.prepare(

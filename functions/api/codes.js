@@ -51,17 +51,6 @@ function json(data, status = 200) {
   });
 }
 
-async function ensurePinned(env) {
-  const now = Date.now();
-  for (const code of PINNED) {
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO codes(code, created_at) VALUES (?, ?)"
-    )
-      .bind(code, now)
-      .run();
-  }
-}
-
 export async function onRequestGet(context) {
   const { request, env } = context;
   if (!env.DB) return json({ ok: false, error: "D1 database is not bound (DB)" }, 500);
@@ -69,7 +58,6 @@ export async function onRequestGet(context) {
 
   try {
     if (url.searchParams.get("pinned") === "1") {
-      await ensurePinned(env);
       const placeholders = PINNED.map(() => "?").join(",");
       const rows = await env.DB.prepare(
         `SELECT code, copies, opens, created_at FROM codes WHERE code IN (${placeholders})`
