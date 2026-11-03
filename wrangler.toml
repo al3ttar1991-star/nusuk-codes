@@ -7,4 +7,4 @@ pages_build_output_dir = "public"
 [[d1_databases]]
 binding = "DB"
 database_name = "nusuk-codes-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "845202ce-d355-4c91-868a-572b19bfe52e"
