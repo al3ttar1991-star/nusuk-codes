@@ -157,7 +157,7 @@ const SESSION_ID = getSessionId();
 
 function updateStats(d){
   if (!d || !d.ok) return;
-  if (d.total !== undefined) document.getElementById("totalCount").textContent = d.total;
+  if (d.total !== undefined) { statsTotal = d.total; document.getElementById("totalCount").textContent = d.total; }
   if (d.addedToday !== undefined) document.getElementById("newCount").textContent = d.addedToday;
   if (d.online !== undefined) document.getElementById("onlineCount").textContent = d.online;
   if (d.totalViews !== undefined) document.getElementById("totalViews").textContent = d.totalViews;
@@ -176,6 +176,7 @@ async function heartbeat(){
 }
 
 let page = 1, pages = 1, total = 0, searchTerm = "";
+let statsTotal = 0;
 
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function cairoDate(ms){
@@ -285,7 +286,9 @@ async function loadList(){
     const r = await fetch(url);
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || "خطأ");
-    total = d.total || 0; pages = d.pages || 1;
+    if (d.total !== undefined) total = d.total;
+    else if (d.hasNext !== undefined) { total = Math.max(statsTotal, page * 20 + (d.hasNext ? 1 : 0)); }
+    pages = Math.max(1, Math.ceil(total / 20));
     if (!d.codes.length) { listEl.innerHTML = '<p class="small">مفيش أكواد لسه. ضيف أول كود من فوق.</p>'; }
     else {
       listEl.innerHTML = d.codes.map((c, idx) =>
@@ -300,7 +303,12 @@ async function loadList(){
     document.getElementById("nextBtn").disabled = searchTerm ? true : page >= pages;
     renderPagination();
   } catch (e) {
-    listEl.innerHTML = '<p class="err">فشل التحميل: ' + esc(e.message) + '</p>';
+    const msg = String(e.message || "");
+    if (msg.includes("D1") || msg.includes("exceeded") || msg.includes("limit")) {
+      listEl.innerHTML = '<p class="err">القايمة وقفت مؤقتًا لأن الموقع وصل لحد القراءة اليومي المجاني في Cloudflare، وهترجع لوحدها بعد منتصف الليل بتوقيت جرينتش (2 الفجر بتوقيت القاهرة) من غير أي دفع. وفي الوقت ده استخدم الأداة القديمة: <a href="https://script.google.com/macros/s/AKfycbw3-kkgCjIBk29xgIxkQZ12XpaB_eizINN-giPt-3dtXh-4fTaFcRvkQ5dY7PhPZihu/exec">الأداة القديمة</a></p>';
+    } else {
+      listEl.innerHTML = '<p class="err">فشل التحميل: ' + esc(e.message) + '</p>';
+    }
   }
 }
 
@@ -340,8 +348,7 @@ document.getElementById("clearOpened").onclick = () => {
 renderLastOpened();
 loadAll();
 recordView();
-heartbeat();
-setInterval(heartbeat, 60000);
+setInterval(heartbeat, 120000);
 </script>
 </body>
 </html>
