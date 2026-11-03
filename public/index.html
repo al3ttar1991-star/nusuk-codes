@@ -21,6 +21,13 @@
   .pinned .btns{margin-top:6px}
   .code{font-family:ui-monospace,monospace;font-size:18px;font-weight:700;direction:ltr;text-align:center;margin:5px 0}
   .counts{text-align:center;color:#555;font-size:12px}
+  .code-row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+  .code-main{flex:1;min-width:0;text-align:start}
+  .code-main .code{text-align:start;margin:3px 0}
+  .code-main .counts{text-align:start}
+  .code-main .small{text-align:start}
+  .code-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+  .code-actions button{width:100%;white-space:nowrap}
   .btns{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px}
   button{border:0;border-radius:9px;padding:7px 12px;font-size:14px;cursor:pointer;background:#1a7a4a;color:#fff}
   button.secondary{background:#eee;color:#222}
@@ -214,15 +221,16 @@ function cardHTML(item, isPinned, label, isNewest){
     ? '<div class="small">أضيف في: ' + esc(cairoDate(item.created_at)) + '</div>' : '';
   return '<div class="card ' + (isPinned ? 'pinned' : '') + (isOpened ? ' opened' : '') + '" data-code="' + esc(item.code) + '">'
     + (isPinned ? '<h2>' + esc(label) + '</h2>' : '')
-    + (isOpened ? '<div style="text-align:center"><span class="badge">✓ تم الفتح</span></div>' : '')
-    + (isNewest ? '<div style="text-align:center"><span class="badge">الأحدث</span></div>' : '')
+    + '<div class="code-row"><div class="code-main">'
+    + (isOpened ? '<div><span class="badge">✓ تم الفتح</span></div>' : '')
+    + (isNewest ? '<div><span class="badge">الأحدث</span></div>' : '')
     + '<div class="code">' + esc(item.code) + '</div>'
     + dateLine
     + '<div class="counts">اتنسخ ' + item.copies + ' مرة  •  اتفتح ' + item.opens + ' مرة</div>'
-    + '<div class="btns">'
+    + '</div><div class="code-actions">'
     + '<button onclick="window.__copy(\'' + esc(item.code) + '\', this)">نسخ الكود</button>'
     + '<button class="secondary" onclick="window.__open(\'' + esc(item.code) + '\')">فتح في المتصفح</button>'
-    + '</div></div>';
+    + '</div></div></div>';
 }
 
 window.__copy = (code, btn) => copyCode(code, btn);
