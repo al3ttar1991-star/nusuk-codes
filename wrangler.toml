@@ -1,0 +1,10 @@
+name = "nusuk-codes"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "public"
+
+# D1 binding. After you create the database in Cloudflare, replace
+# database_id below with the real ID shown in Dashboard > D1.
+[[d1_databases]]
+binding = "DB"
+database_name = "nusuk-codes-db"
+database_id = "00000000-0000-0000-0000-000000000000"
