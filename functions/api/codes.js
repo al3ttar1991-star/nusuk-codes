@@ -51,6 +51,15 @@ function json(data, status = 200) {
   });
 }
 
+async function getPinned(env) {
+  const placeholders = PINNED.map(() => "?").join(",");
+  const rows = await env.DB.prepare(
+    `SELECT code, copies, opens, created_at FROM codes WHERE code IN (${placeholders})`
+  ).bind(...PINNED).all();
+  const byCode = new Map((rows.results || []).map((r) => [r.code, r]));
+  return PINNED.map((code) => byCode.get(code) || { code, copies: 0, opens: 0, created_at: Date.now() });
+}
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   if (!env.DB) return json({ ok: false, error: "D1 database is not bound (DB)" }, 500);
@@ -58,45 +67,48 @@ export async function onRequestGet(context) {
 
   try {
     if (url.searchParams.get("pinned") === "1") {
-      const placeholders = PINNED.map(() => "?").join(",");
-      const rows = await env.DB.prepare(
-        `SELECT code, copies, opens, created_at FROM codes WHERE code IN (${placeholders})`
-      )
-        .bind(...PINNED)
-        .all();
-      const byCode = new Map((rows.results || []).map((r) => [r.code, r]));
-      const pinned = PINNED.map(
-        (code) => byCode.get(code) || { code, copies: 0, opens: 0, created_at: Date.now() }
-      );
-      return json({ ok: true, pinned });
+      return json({ ok: true, pinned: await getPinned(env) });
     }
 
     const placeholders = PINNED.map(() => "?").join(",");
-    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
+    // Cursor pagination (keyset): each page reads only 20 rows via the
+    // created_at/id index, never an OFFSET scan. Cursor format "created:id"
+    // of the last row of the previous page; absent = first page.
+    const cursorRaw = url.searchParams.get("cursor") || "";
+    let cursorCreated = null, cursorId = null;
+    const cm = cursorRaw.match(/^(\d+):(\d+)$/);
+    if (cm) { cursorCreated = Number(cm[1]); cursorId = Number(cm[2]); }
     const limit = 20;
-    const offset = (page - 1) * limit;
 
-    // No COUNT(*) here any more: counting the whole table on every page
-    // load was a major source of daily row reads. The frontend already
-    // gets the (stored-counter) total from /api/stats and uses it for
-    // pagination; fetch one extra row only to know if a next page exists.
-    const rows = await env.DB.prepare(
-      `SELECT code, copies, opens, created_at FROM codes
-       WHERE code NOT IN (${placeholders})
-       ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
-    )
-      .bind(...PINNED, limit + 1, offset)
-      .all();
+    let rows;
+    if (cursorCreated !== null) {
+      rows = await env.DB.prepare(
+        `SELECT id, code, copies, opens, created_at FROM codes
+         WHERE code NOT IN (${placeholders})
+           AND (created_at < ? OR (created_at = ? AND id < ?))
+         ORDER BY created_at DESC, id DESC LIMIT ?`
+      ).bind(...PINNED, cursorCreated, cursorCreated, cursorId, limit + 1).all();
+    } else {
+      rows = await env.DB.prepare(
+        `SELECT id, code, copies, opens, created_at FROM codes
+         WHERE code NOT IN (${placeholders})
+         ORDER BY created_at DESC, id DESC LIMIT ?`
+      ).bind(...PINNED, limit + 1).all();
+    }
     const allRows = rows.results || [];
     const hasNext = allRows.length > limit;
     const codes = hasNext ? allRows.slice(0, limit) : allRows;
+    const nextCursor = hasNext && codes.length
+      ? codes[codes.length - 1].created_at + ":" + codes[codes.length - 1].id
+      : null;
 
     return json({
       ok: true,
       codes,
-      page,
+      pinned: await getPinned(env),
       limit,
       hasNext,
+      nextCursor,
     });
   } catch (e) {
     return json({ ok: false, error: String(e && e.message ? e.message : e) }, 500);
@@ -108,6 +120,7 @@ export async function onRequestPost(context) {
   if (!env.DB) return json({ ok: false, error: "D1 database is not bound (DB)" }, 500);
   let body = {};
   try {
+    try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_codes_created ON codes(created_at DESC, id DESC)").run(); } catch {}
     body = await request.json();
   } catch {
     return json({ ok: false, error: "invalid json" }, 400);
