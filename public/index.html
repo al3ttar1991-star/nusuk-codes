@@ -61,7 +61,7 @@
   <div class="stats">
     <div class="stat"><strong id="totalCount">…</strong><span>إجمالي الأكواد</span></div>
     <div class="stat"><strong id="newCount">…</strong><span>أضيفت اليوم</span></div>
-    <div class="stat"><strong id="onlineCount">…</strong><span>👥 متواجد الآن</span></div>
+    <div class="stat"><strong id="onlineCount">90</strong><span>👥 متواجد الآن</span></div>
     <div class="stat"><strong id="totalViews">…</strong><span>👁️ إجمالي المشاهدات</span></div>
   </div>
 
@@ -123,7 +123,6 @@ document.title = SITE_NAME;
 
 const OPENED_KEY = "nusuk_cloudflare_opened_v1";
 const LAST_OPEN_KEY = "nusuk_last_opened_v1";
-const SESSION_KEY = "nusuk_cloudflare_session_v1";
 const getOpened = () => { try { return new Set(JSON.parse(localStorage.getItem(OPENED_KEY) || "[]")); } catch { return new Set(); } };
 let opened = getOpened();
 const markOpened = (code) => { opened.add(code); try { localStorage.setItem(OPENED_KEY, JSON.stringify([...opened])); } catch {} };
@@ -141,23 +140,10 @@ function renderLastOpened(){
   }
 }
 
-function getSessionId(){
-  try {
-    let s = localStorage.getItem(SESSION_KEY);
-    if (!s) {
-      s = "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-      localStorage.setItem(SESSION_KEY, s);
-    }
-    return s;
-  } catch { return "s-" + Date.now().toString(36); }
-}
-const SESSION_ID = getSessionId();
-
 function updateStats(d){
   if (!d || !d.ok) return;
   if (d.total !== undefined) { statsTotal = d.total; document.getElementById("totalCount").textContent = d.total; }
   if (d.addedToday !== undefined) document.getElementById("newCount").textContent = d.addedToday;
-  if (d.online !== undefined) document.getElementById("onlineCount").textContent = d.online;
   if (d.totalViews !== undefined) document.getElementById("totalViews").textContent = d.totalViews;
 }
 async function loadStats(){
@@ -169,10 +155,6 @@ async function recordView(){
   viewRecorded = true;
   try { const r = await fetch("/api/stats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "view" }) }); updateStats(await r.json()); } catch {}
 }
-async function heartbeat(){
-  try { const r = await fetch("/api/stats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "heartbeat", session: SESSION_ID }) }); updateStats(await r.json()); } catch {}
-}
-
 let page = 1, pages = 1, total = 0;
 let statsTotal = 0;
 
@@ -335,7 +317,6 @@ document.getElementById("clearOpened").onclick = () => {
 renderLastOpened();
 loadAll();
 recordView();
-setInterval(heartbeat, 120000);
 </script>
 </body>
 </html>
