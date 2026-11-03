@@ -66,7 +66,6 @@ export async function onRequestGet(context) {
   const { request, env } = context;
   if (!env.DB) return json({ ok: false, error: "D1 database is not bound (DB)" }, 500);
   const url = new URL(request.url);
-  const q = (url.searchParams.get("q") || "").trim();
 
   try {
     if (url.searchParams.get("pinned") === "1") {
@@ -85,21 +84,6 @@ export async function onRequestGet(context) {
     }
 
     const placeholders = PINNED.map(() => "?").join(",");
-    if (q) {
-      // Fetch one extra row to know whether the 500 cap was hit.
-      const rows = await env.DB.prepare(
-        `SELECT code, copies, opens, created_at FROM codes
-         WHERE code LIKE ? AND code NOT IN (${placeholders})
-         ORDER BY created_at DESC, id DESC LIMIT 501`
-      )
-        .bind(`%${q}%`, ...PINNED)
-        .all();
-      const all = rows.results || [];
-      const capped = all.length > 500;
-      const codes = capped ? all.slice(0, 500) : all;
-      return json({ ok: true, codes, total: codes.length, search: true, capped });
-    }
-
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
     const limit = 20;
     const offset = (page - 1) * limit;
