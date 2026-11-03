@@ -80,8 +80,6 @@
 
   <div class="card">
     <h2>كل الأكواد <span class="small">الأحدث فوق</span></h2>
-    <input id="search" placeholder="ابحث بكود كامل أو جزء منه" autocomplete="off" style="margin-bottom:10px">
-    <div class="btns"><button class="secondary" id="clearSearch">مسح البحث</button></div>
     <div id="list">جاري التحميل…</div>
     <div class="pager">
       <button class="secondary" id="prevBtn">السابق</button>
@@ -175,7 +173,7 @@ async function heartbeat(){
   try { const r = await fetch("/api/stats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "heartbeat", session: SESSION_ID }) }); updateStats(await r.json()); } catch {}
 }
 
-let page = 1, pages = 1, total = 0, searchTerm = "";
+let page = 1, pages = 1, total = 0;
 let statsTotal = 0;
 
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -260,7 +258,7 @@ async function loadPinned(){
 
 function renderPagination(){
   const box = document.getElementById("pageNumbers");
-  if (searchTerm || pages <= 1) { box.innerHTML = ""; return; }
+  if (pages <= 1) { box.innerHTML = ""; return; }
   const candidates = [1, pages, page - 2, page - 1, page, page + 1, page + 2];
   const list = [];
   candidates.sort((a, b) => a - b).forEach(p => {
@@ -280,9 +278,7 @@ async function loadList(){
   const listEl = document.getElementById("list");
   listEl.textContent = "جاري التحميل…";
   try {
-    const url = searchTerm
-      ? "/api/codes?q=" + encodeURIComponent(searchTerm)
-      : "/api/codes?page=" + page;
+    const url = "/api/codes?page=" + page;
     const r = await fetch(url);
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || "خطأ");
@@ -292,15 +288,12 @@ async function loadList(){
     if (!d.codes.length) { listEl.innerHTML = '<p class="small">مفيش أكواد لسه. ضيف أول كود من فوق.</p>'; }
     else {
       listEl.innerHTML = d.codes.map((c, idx) =>
-        cardHTML(c, false, "", !searchTerm && page === 1 && idx === 0)).join("");
-      if (searchTerm && d.capped) {
-        listEl.innerHTML += '<p class="small">عرض أول 500 نتيجة مطابقة، ضيّق البحث أكتر لنتيجة أدق.</p>';
-      }
+        cardHTML(c, false, "", page === 1 && idx === 0)).join("");
     }
-    document.getElementById("pageInfo").textContent = searchTerm ? "نتائج البحث" : ("صفحة " + page + " من " + pages);
+    document.getElementById("pageInfo").textContent = "صفحة " + page + " من " + pages;
     document.getElementById("totalInfo").textContent = "إجمالي الأكواد (من غير المثبت): " + total;
-    document.getElementById("prevBtn").disabled = searchTerm ? true : page <= 1;
-    document.getElementById("nextBtn").disabled = searchTerm ? true : page >= pages;
+    document.getElementById("prevBtn").disabled = page <= 1;
+    document.getElementById("nextBtn").disabled = page >= pages;
     renderPagination();
   } catch (e) {
     const msg = String(e.message || "");
@@ -326,16 +319,10 @@ document.getElementById("addBtn").onclick = async () => {
     if (!d.ok) throw new Error(d.error || "خطأ");
     msg.textContent = d.message || ("تمت إضافة " + (d.added || 0) + " كود، وتخطي " + (d.skipped || 0) + " مكرر.");
     msg.className = "msg";
-    input.value = ""; searchTerm = ""; document.getElementById("search").value = ""; page = 1; loadAll(); loadStats();
+    input.value = ""; page = 1; loadAll(); loadStats();
   } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
 };
 
-let searchTimer = null;
-document.getElementById("search").addEventListener("input", (e) => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { searchTerm = e.target.value.trim(); page = 1; loadList(); }, 400);
-});
-document.getElementById("clearSearch").onclick = () => { searchTerm = ""; document.getElementById("search").value = ""; page = 1; loadList(); };
 document.getElementById("prevBtn").onclick = () => { if (page > 1) { page--; loadList(); } };
 document.getElementById("nextBtn").onclick = () => { if (page < pages) { page++; loadList(); } };
 document.getElementById("clearOpened").onclick = () => {
