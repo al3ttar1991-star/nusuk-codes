@@ -156,6 +156,9 @@ async function recordView(){
   try { const r = await fetch("/api/stats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "view" }) }); updateStats(await r.json()); } catch {}
 }
 let page = 1, pages = 1, total = 0;
+let cursorStack = [null];
+let hasNextPage = false;
+let nextCursor = null;
 let statsTotal = 0;
 
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -222,51 +225,26 @@ window.__open = async (code) => {
   const d = await count(code, "open");
   if (d && d.ok) updateCounts(code, d.copies, d.opens);
   window.open(openUrl(code), "_blank");
-  loadAll(false);
+  loadAll();
 };
-
-async function loadPinned(){
-  try {
-    const r = await fetch("/api/codes?pinned=1");
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || "خطأ");
-    document.getElementById("pinnedBox").innerHTML = d.pinned.map((p, i) =>
-      cardHTML(p, true, i === 0 ? "⭐ ابدأ بالكود ده الأول" : "⭐ كود مثبت", false)).join("")
-      + '<p class="small">ابدأ بالكود المثبت الأول، وبعدين كمّل على باقي الأكواد تحت.</p>';
-  } catch (e) {
-    document.getElementById("pinnedBox").innerHTML = '<p class="small err">الكود المثبت مش ظاهر لسه — اتأكد إن قاعدة D1 مربوطة وإن الـ schema اتنفذ.</p>';
-  }
-}
-
-function renderPagination(){
-  const box = document.getElementById("pageNumbers");
-  if (pages <= 1) { box.innerHTML = ""; return; }
-  const candidates = [1, pages, page - 2, page - 1, page, page + 1, page + 2];
-  const list = [];
-  candidates.sort((a, b) => a - b).forEach(p => {
-    if (p >= 1 && p <= pages && list.indexOf(p) === -1) list.push(p);
-  });
-  let html = "", prev = 0;
-  list.forEach(p => {
-    if (prev && p - prev > 1) html += '<span class="page-dots">…</span>';
-    html += '<button class="page-btn' + (p === page ? ' active' : '') + '" onclick="window.__goPage(' + p + ')">' + p + '</button>';
-    prev = p;
-  });
-  box.innerHTML = html;
-}
-window.__goPage = (p) => { page = p; loadList(); };
 
 async function loadList(){
   const listEl = document.getElementById("list");
   listEl.textContent = "جاري التحميل…";
   try {
-    const url = "/api/codes?page=" + page;
+    const cur = cursorStack[page - 1];
+    const url = cur ? "/api/codes?cursor=" + encodeURIComponent(cur) : "/api/codes";
     const r = await fetch(url);
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || "خطأ");
     if (d.total !== undefined) total = d.total;
     else if (d.hasNext !== undefined) { total = Math.max(statsTotal, page * 20 + (d.hasNext ? 1 : 0)); }
     pages = Math.max(1, Math.ceil(total / 20));
+    if (d.pinned) {
+      document.getElementById("pinnedBox").innerHTML = d.pinned.map((p, i) =>
+        cardHTML(p, true, i === 0 ? "⭐ ابدأ بالكود ده الأول" : "⭐ كود مثبت", false)).join("")
+        + '<p class="small">ابدأ بالكود المثبت الأول، وبعدين كمّل على باقي الأكواد تحت.</p>';
+    }
     if (!d.codes.length) { listEl.innerHTML = '<p class="small">مفيش أكواد لسه. ضيف أول كود من فوق.</p>'; }
     else {
       listEl.innerHTML = d.codes.map((c, idx) =>
@@ -274,9 +252,10 @@ async function loadList(){
     }
     document.getElementById("pageInfo").textContent = "صفحة " + page + " من " + pages;
     document.getElementById("totalInfo").textContent = "إجمالي الأكواد (من غير المثبت): " + total;
+    hasNextPage = !!d.hasNext;
+    nextCursor = d.nextCursor || null;
     document.getElementById("prevBtn").disabled = page <= 1;
-    document.getElementById("nextBtn").disabled = page >= pages;
-    renderPagination();
+    document.getElementById("nextBtn").disabled = !hasNextPage;
   } catch (e) {
     const msg = String(e.message || "");
     if (msg.includes("D1") || msg.includes("exceeded") || msg.includes("limit")) {
@@ -287,7 +266,7 @@ async function loadList(){
   }
 }
 
-function loadAll(reloadPinned = true){ if (reloadPinned) loadPinned(); loadList(); }
+function loadAll(){ loadList(); }
 
 document.getElementById("addBtn").onclick = async () => {
   const input = document.getElementById("newCode");
@@ -301,17 +280,17 @@ document.getElementById("addBtn").onclick = async () => {
     if (!d.ok) throw new Error(d.error || "خطأ");
     msg.textContent = d.message || ("تمت إضافة " + (d.added || 0) + " كود، وتخطي " + (d.skipped || 0) + " مكرر.");
     msg.className = "msg";
-    input.value = ""; page = 1; loadAll(); loadStats();
+    input.value = ""; page = 1; cursorStack = [null]; loadAll(); loadStats();
   } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
 };
 
 document.getElementById("prevBtn").onclick = () => { if (page > 1) { page--; loadList(); } };
-document.getElementById("nextBtn").onclick = () => { if (page < pages) { page++; loadList(); } };
+document.getElementById("nextBtn").onclick = () => { if (!hasNextPage) return; if (page === cursorStack.length && nextCursor) cursorStack.push(nextCursor); page++; loadList(); };
 document.getElementById("clearOpened").onclick = () => {
   opened = new Set();
   try { localStorage.removeItem(OPENED_KEY); localStorage.removeItem(LAST_OPEN_KEY); } catch {}
   renderLastOpened();
-  loadAll(false);
+  loadAll();
 };
 
 renderLastOpened();
