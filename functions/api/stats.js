@@ -5,24 +5,19 @@
 //   -> { ok, total, addedToday, online, totalViews }
 //   total: codes excluding the pinned codes.
 //   addedToday: codes added on the current Africa/Cairo calendar day.
-//   online: sessions with a heartbeat in the last 3 minutes.
+//   online: fixed display value 90 (heartbeat removed, per owner decision).
 //   totalViews: incremented once per page load via POST { action: "view" }.
 //   All counters start from 0 on this site; old-tool counts are NOT imported.
 //
 // POST /api/stats  { action: "view" }
 //   -> increments totalViews once. The frontend calls this once per page load,
-//      never per heartbeat and never per list poll.
-// POST /api/stats  { action: "heartbeat", session: "<session id>" }
-//   -> records/refreshes one session, prunes sessions older than 3 minutes,
-//      returns the current online count.
+//      never per list poll (heartbeat removed).
 //
 // New D1 tables are created automatically here (CREATE TABLE IF NOT EXISTS),
 // so no manual D1 Studio step is needed when this version is deployed:
 //   stats    (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)
-//   sessions (id TEXT PRIMARY KEY, last_seen INTEGER NOT NULL)
 
 const PINNED = ["NG-L4OsDf55", "NG-A5xqvFoY"];
-const ONLINE_WINDOW_MS = 3 * 60 * 1000;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -34,9 +29,6 @@ function json(data, status = 200) {
 async function ensureTables(env) {
   await env.DB.prepare(
     "CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)"
-  ).run();
-  await env.DB.prepare(
-    "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, last_seen INTEGER NOT NULL)"
   ).run();
 }
 
@@ -103,14 +95,7 @@ async function initCounters(env, now) {
 async function readCountsLight(env, now) {
   const counters = await initCounters(env, now);
   const viewsRow = await env.DB.prepare("SELECT value FROM stats WHERE key = 'totalViews'").first();
-  await env.DB.prepare("DELETE FROM sessions WHERE last_seen < ?").bind(now - ONLINE_WINDOW_MS).run();
-  const onlineRow = await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first();
-  return { total: counters.total, addedToday: counters.addedToday, totalViews: viewsRow ? viewsRow.value : 0, online: onlineRow ? onlineRow.n : 0 };
-}
-async function readOnlineOnly(env, now) {
-  await env.DB.prepare("DELETE FROM sessions WHERE last_seen < ?").bind(now - ONLINE_WINDOW_MS).run();
-  const onlineRow = await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first();
-  return { online: onlineRow ? onlineRow.n : 0 };
+  return { total: counters.total, addedToday: counters.addedToday, totalViews: viewsRow ? viewsRow.value : 0, online: 90 };
 }
 export async function onRequestGet(context) {
   const { env } = context;
@@ -142,21 +127,7 @@ export async function onRequestPost(context) {
         "INSERT INTO stats(key, value) VALUES ('totalViews', 1) " +
         "ON CONFLICT(key) DO UPDATE SET value = value + 1"
       ).run();
-    } else if (action === "heartbeat") {
-      const session = String(body.session || "").trim();
-      if (!/^[A-Za-z0-9_-]{1,64}$/.test(session)) {
-        return json({ ok: false, error: "invalid session" }, 400);
-      }
-      await env.DB.prepare(
-        "INSERT INTO sessions(id, last_seen) VALUES (?, ?) " +
-        "ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen"
-      ).bind(session, now).run();
-      // Heartbeat must NOT re-count the whole codes table: it used to scan
-      // every code on every heartbeat, which is what blew the daily row-read
-      // limit. Return the online count only.
-      const online = await readOnlineOnly(env, now);
-      return json({ ok: true, ...online });
-    } else {
+        } else {
       return json({ ok: false, error: "unknown action" }, 400);
     }
     const counts = await readCountsLight(env, now);
