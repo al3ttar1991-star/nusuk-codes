@@ -104,28 +104,27 @@ export async function onRequestGet(context) {
     const limit = 20;
     const offset = (page - 1) * limit;
 
-    const totalRow = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM codes WHERE code NOT IN (${placeholders})`
-    )
-      .bind(...PINNED)
-      .first();
-    const total = totalRow ? totalRow.n : 0;
-
+    // No COUNT(*) here any more: counting the whole table on every page
+    // load was a major source of daily row reads. The frontend already
+    // gets the (stored-counter) total from /api/stats and uses it for
+    // pagination; fetch one extra row only to know if a next page exists.
     const rows = await env.DB.prepare(
       `SELECT code, copies, opens, created_at FROM codes
        WHERE code NOT IN (${placeholders})
        ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
     )
-      .bind(...PINNED, limit, offset)
+      .bind(...PINNED, limit + 1, offset)
       .all();
+    const allRows = rows.results || [];
+    const hasNext = allRows.length > limit;
+    const codes = hasNext ? allRows.slice(0, limit) : allRows;
 
     return json({
       ok: true,
-      codes: rows.results || [],
-      total,
+      codes,
       page,
       limit,
-      pages: Math.max(1, Math.ceil(total / limit)),
+      hasNext,
     });
   } catch (e) {
     return json({ ok: false, error: String(e && e.message ? e.message : e) }, 500);
@@ -195,6 +194,20 @@ export async function onRequestPost(context) {
       }
     }
     const skipped = codes.length - added;
+    if (added > 0) {
+      try {
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)").run();
+        await env.DB.prepare("INSERT INTO stats(key, value) VALUES ('totalCodes', ?) ON CONFLICT(key) DO UPDATE SET value = value + ?").bind(added, added).run();
+        const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+        const dateRow = await env.DB.prepare("SELECT value FROM stats WHERE key = 'addedTodayDate'").first();
+        if (!dateRow || String(dateRow.value) !== todayStr) {
+          await env.DB.prepare("INSERT INTO stats(key, value) VALUES ('addedToday', ?) ON CONFLICT(key) DO UPDATE SET value = ?").bind(added, added).run();
+          await env.DB.prepare("INSERT INTO stats(key, value) VALUES ('addedTodayDate', ?) ON CONFLICT(key) DO UPDATE SET value = ?").bind(todayStr, todayStr).run();
+        } else {
+          await env.DB.prepare("INSERT INTO stats(key, value) VALUES ('addedToday', ?) ON CONFLICT(key) DO UPDATE SET value = value + ?").bind(added, added).run();
+        }
+      } catch {}
+    }
     return json({
       ok: true,
       added,

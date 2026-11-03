@@ -68,37 +68,56 @@ function cairoDayStartMs(nowMs) {
   return asUTC - (asUTC2 - asUTC);
 }
 
-async function readCounts(env, now) {
-  const placeholders = PINNED.map(() => "?").join(",");
-  const totalRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM codes WHERE code NOT IN (${placeholders})`
-  ).bind(...PINNED).first();
-  const todayRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM codes WHERE code NOT IN (${placeholders}) AND created_at >= ?`
-  ).bind(...PINNED, cairoDayStartMs(now)).first();
-  const viewsRow = await env.DB.prepare(
-    "SELECT value FROM stats WHERE key = 'totalViews'"
-  ).first();
-  await env.DB.prepare(
-    "DELETE FROM sessions WHERE last_seen < ?"
-  ).bind(now - ONLINE_WINDOW_MS).run();
-  const onlineRow = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM sessions"
-  ).first();
-  return {
-    total: totalRow ? totalRow.n : 0,
-    addedToday: todayRow ? todayRow.n : 0,
-    totalViews: viewsRow ? viewsRow.value : 0,
-    online: onlineRow ? onlineRow.n : 0,
-  };
+async function cairoDateStr(nowMs) {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" });
+  return fmt.format(new Date(nowMs));
 }
-
+async function getStat(env, key) {
+  const row = await env.DB.prepare("SELECT value FROM stats WHERE key = ?").bind(key).first();
+  return row ? row.value : null;
+}
+async function setStat(env, key, value) {
+  await env.DB.prepare("INSERT INTO stats(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value).run();
+}
+async function initCounters(env, now) {
+  // One-time initialisation only: if the counters do not exist yet, count
+  // once and store them. Every later call reads the stored counters only,
+  // so a page load no longer scans the whole codes table.
+  let total = await getStat(env, "totalCodes");
+  if (total === null) {
+    const placeholders = PINNED.map(() => "?").join(",");
+    const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM codes WHERE code NOT IN (${placeholders})`).bind(...PINNED).first();
+    total = row ? row.n : 0;
+    await setStat(env, "totalCodes", total);
+  }
+  let today = await getStat(env, "addedToday");
+  const todayDate = await getStat(env, "addedTodayDate");
+  const todayStr = await cairoDateStr(now);
+  if (today === null || todayDate !== todayStr) {
+    today = 0;
+    await setStat(env, "addedToday", 0);
+    await setStat(env, "addedTodayDate", todayStr);
+  }
+  return { total, addedToday: today };
+}
+async function readCountsLight(env, now) {
+  const counters = await initCounters(env, now);
+  const viewsRow = await env.DB.prepare("SELECT value FROM stats WHERE key = 'totalViews'").first();
+  await env.DB.prepare("DELETE FROM sessions WHERE last_seen < ?").bind(now - ONLINE_WINDOW_MS).run();
+  const onlineRow = await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first();
+  return { total: counters.total, addedToday: counters.addedToday, totalViews: viewsRow ? viewsRow.value : 0, online: onlineRow ? onlineRow.n : 0 };
+}
+async function readOnlineOnly(env, now) {
+  await env.DB.prepare("DELETE FROM sessions WHERE last_seen < ?").bind(now - ONLINE_WINDOW_MS).run();
+  const onlineRow = await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first();
+  return { online: onlineRow ? onlineRow.n : 0 };
+}
 export async function onRequestGet(context) {
   const { env } = context;
   if (!env.DB) return json({ ok: false, error: "D1 database is not bound (DB)" }, 500);
   try {
     await ensureTables(env);
-    const counts = await readCounts(env, Date.now());
+    const counts = await readCountsLight(env, Date.now());
     return json({ ok: true, ...counts });
   } catch (e) {
     return json({ ok: false, error: String(e && e.message ? e.message : e) }, 500);
@@ -132,10 +151,15 @@ export async function onRequestPost(context) {
         "INSERT INTO sessions(id, last_seen) VALUES (?, ?) " +
         "ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen"
       ).bind(session, now).run();
+      // Heartbeat must NOT re-count the whole codes table: it used to scan
+      // every code on every heartbeat, which is what blew the daily row-read
+      // limit. Return the online count only.
+      const online = await readOnlineOnly(env, now);
+      return json({ ok: true, ...online });
     } else {
       return json({ ok: false, error: "unknown action" }, 400);
     }
-    const counts = await readCounts(env, now);
+    const counts = await readCountsLight(env, now);
     return json({ ok: true, ...counts });
   } catch (e) {
     return json({ ok: false, error: String(e && e.message ? e.message : e) }, 500);
